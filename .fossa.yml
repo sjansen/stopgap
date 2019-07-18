@@ -1,0 +1,13 @@
+version: 1
+cli:
+  server: https://app.fossa.io
+  fetcher: custom
+  project: stopgap
+analyze:
+  modules:
+  - name: github.com/sjansen/stopgap
+    type: go
+    target: github.com/sjansen/stopgap
+    path: .
+    options:
+      all-tags: true

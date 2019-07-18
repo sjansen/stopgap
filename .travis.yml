@@ -1,0 +1,27 @@
+dist: trusty
+language: go
+go:
+  - 1.11.x
+env:
+  - GO111MODULE=on
+services:
+  - docker
+
+before_script:
+  - "curl -H 'Cache-Control: no-cache' https://raw.githubusercontent.com/fossas/fossa-cli/master/install.sh | sudo bash"
+  - curl -L https://codeclimate.com/downloads/test-reporter/test-reporter-latest-linux-amd64 > ./cc-test-reporter
+  - chmod +x ./cc-test-reporter
+  - 'if [[ -n "$CC_TEST_REPORTER_ID" ]]; then ./cc-test-reporter before-build; fi'
+
+script:
+  - go mod download
+  - 'if [[ -n "$FOSSA_API_KEY" ]]; then fossa analyze; fi'
+  - scripts/docker-up-test
+
+after_script:
+  - 'if [[ -n "$CC_TEST_REPORTER_ID" ]]; then ./cc-test-reporter after-build --exit-code $TRAVIS_TEST_RESULT; fi'
+
+after_success:
+  - mv dist/coverage.txt coverage.txt
+  - bash <(curl -s https://codecov.io/bash)
+  - 'if [[ -n "$FOSSA_API_KEY" ]]; then fossa test --timeout 300; fi'

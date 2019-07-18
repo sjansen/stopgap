@@ -1,0 +1,28 @@
+exclude: '^vendor/'
+repos:
+-  repo: local
+   hooks:
+   -  id: vet
+      name: go vet
+      language: system
+      entry: go vet -tags integration ./...
+      pass_filenames: false
+      types: [go]
+   -  id: lint
+      name: golangci
+      language: system
+      entry: golangci-lint run
+      pass_filenames: false
+      types: [go]
+   -  id: revive
+      name: revive
+      language: system
+      entry: revive -exclude ./vendor/... ./...
+      pass_filenames: false
+      types: [go]
+   -  id: terraform
+      name: terraform
+      language: system
+      entry: terraform fmt -check -recursive terraform/
+      pass_filenames: false
+      types: [terraform]
