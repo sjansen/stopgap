@@ -10,9 +10,9 @@ type Clock interface {
 }
 
 type Repo interface {
-	Create(rqx *rqx.RequestContext, name, description string) error
-	Lock(rqx *rqx.RequestContext, name, message string) error
-	Unlock(rqx *rqx.RequestContext, name, message string) error
+	CreateMutex(rqx *rqx.RequestContext, name, description string) error
+	LockMutex(rqx *rqx.RequestContext, name, message string) error
+	UnlockMutex(rqx *rqx.RequestContext, name string) error
 }
 
 type Manager struct {
@@ -29,14 +29,14 @@ var lockRetryDelays = []time.Duration{
 }
 
 func (m *Manager) CreateMutex(rqx *rqx.RequestContext, name, description string) error {
-	return m.Mutexes.Create(rqx, name, description)
+	return m.Mutexes.CreateMutex(rqx, name, description)
 }
 
 func (m *Manager) LockMutex(rqx *rqx.RequestContext, name, message string) error {
 	var err error
 	for _, d := range lockRetryDelays {
 		m.Clock.Sleep(d)
-		if err = m.Mutexes.Lock(rqx, name, message); err == nil {
+		if err = m.Mutexes.LockMutex(rqx, name, message); err == nil {
 			break
 		}
 	}

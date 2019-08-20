@@ -14,9 +14,10 @@ type RequestContext struct {
 }
 
 type User struct {
-	UID   ulid.ULID
-	Name  string
-	Email string
+	UID     ulid.ULID
+	Name    string
+	Email   string
+	SlackID string
 }
 
 type Client struct {

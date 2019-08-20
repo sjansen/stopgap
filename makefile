@@ -6,6 +6,12 @@ refresh:
 	cookiecutter gh:sjansen/cookiecutter-golang --output-dir .. --config-file .cookiecutter.yaml --no-input --overwrite-if-exists
 	git checkout go.mod go.sum
 
+start:
+	docker-compose \
+		-f docker-compose.yml \
+		-f docker-compose.override.yml \
+		up dynamodb
+
 test:
 	@scripts/run-all-tests
 	@echo ========================================
