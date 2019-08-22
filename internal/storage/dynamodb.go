@@ -3,6 +3,7 @@ package storage
 import (
 	"crypto/rand"
 	"encoding/base64"
+	"strconv"
 	"time"
 
 	"github.com/aws/aws-sdk-go/aws"
@@ -81,24 +82,9 @@ func (s *DynamoStore) CreateMutex(rqx *rqx.RequestContext, name, description str
 }
 
 // GetMutex returns the data for a given mutex from the DynamoStore instance.
-func (s *DynamoStore) GetMutex(consistent bool, name string) (*Mutex, error) {
+func (s *DynamoStore) GetMutex(name string, consistent bool) (*Mutex, error) {
 	id := mutexEntityID(name)
-
-	result, err := s.svc.GetItem(&dynamodb.GetItemInput{
-		ConsistentRead: aws.Bool(consistent),
-		TableName:      s.table,
-		Key: map[string]*dynamodb.AttributeValue{
-			"entity":   {S: aws.String(id)},
-			"revision": {N: aws.String("0")},
-		},
-		ProjectionExpression: aws.String("version, summary"),
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	item := &mutex{}
-	err = dynamodbattribute.UnmarshalMap(result.Item, item)
+	item, err := s.getMutex(id, "version, summary", consistent)
 	if err != nil {
 		return nil, err
 	}
@@ -115,9 +101,14 @@ func (s *DynamoStore) GetMutex(consistent bool, name string) (*Mutex, error) {
 // LockMutex locks the named mutex.
 func (s *DynamoStore) LockMutex(rqx *rqx.RequestContext, name, message string) error {
 	id := mutexEntityID(name)
+	item, err := s.getMutex(id, "version", true)
+	if err != nil {
+		return err
+	}
 
 	t := &writeTransaction{}
-	err := t.addUpdate(&dynamodb.Update{
+	version := item.Version + 1
+	err = t.addUpdate(&dynamodb.Update{
 		TableName: s.table,
 		Key: map[string]*dynamodb.AttributeValue{
 			"entity":   {S: aws.String(id)},
@@ -129,14 +120,18 @@ func (s *DynamoStore) LockMutex(rqx *rqx.RequestContext, name, message string) e
 		UpdateExpression: aws.String(`
 			SET summary.locked = :locked,
 			    summary.locked_by = :locked_by,
-			    summary.message = :message
+			    summary.message = :message,
+			    version = :version
 		`),
 		ExpressionAttributeValues: map[string]*dynamodb.AttributeValue{
 			":locked":    {BOOL: aws.Bool(true)},
 			":locked_by": {S: aws.String(rqx.EUser.SlackID)},
 			":message":   {S: aws.String(message)},
+			":version": {N: aws.String(
+				strconv.FormatInt(version, 10),
+			)},
 		},
-	}).addEvent(rqx, s.table, id, 2, // TODO increment revision
+	}).addEvent(rqx, s.table, id, version,
 		"mutex-locked",
 		map[string]string{
 			"message": message,
@@ -152,9 +147,14 @@ func (s *DynamoStore) LockMutex(rqx *rqx.RequestContext, name, message string) e
 // UnlockMutex unlocks the named mutex.
 func (s *DynamoStore) UnlockMutex(rqx *rqx.RequestContext, name string) error {
 	id := mutexEntityID(name)
+	item, err := s.getMutex(id, "version", true)
+	if err != nil {
+		return err
+	}
 
 	t := &writeTransaction{}
-	err := t.addUpdate(&dynamodb.Update{
+	version := item.Version + 1
+	err = t.addUpdate(&dynamodb.Update{
 		TableName: s.table,
 		Key: map[string]*dynamodb.AttributeValue{
 			"entity":   {S: aws.String(id)},
@@ -164,13 +164,18 @@ func (s *DynamoStore) UnlockMutex(rqx *rqx.RequestContext, name string) error {
 			"summary.locked <> :locked",
 		),
 		UpdateExpression: aws.String(`
-			SET summary.locked = :locked
-			REMOVE summary.locked_by, summary.message
+			SET summary.locked = :locked,
+			    version = :version
+			REMOVE summary.locked_by,
+			       summary.message
 		`),
 		ExpressionAttributeValues: map[string]*dynamodb.AttributeValue{
 			":locked": {BOOL: aws.Bool(false)},
+			":version": {N: aws.String(
+				strconv.FormatInt(version, 10),
+			)},
 		},
-	}).addEvent(rqx, s.table, id, 3, // TODO increment revision
+	}).addEvent(rqx, s.table, id, version,
 		"mutex-unlocked",
 		map[string]string{},
 	)
@@ -251,6 +256,29 @@ func (s *DynamoStore) createTable() error {
 	}
 	_, err := s.svc.CreateTable(createTable)
 	return err
+}
+
+func (s *DynamoStore) getMutex(id, projection string, consistent bool) (*mutex, error) {
+	result, err := s.svc.GetItem(&dynamodb.GetItemInput{
+		ConsistentRead: aws.Bool(consistent),
+		TableName:      s.table,
+		Key: map[string]*dynamodb.AttributeValue{
+			"entity":   {S: aws.String(id)},
+			"revision": {N: aws.String("0")},
+		},
+		ProjectionExpression: aws.String(projection),
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	item := &mutex{}
+	err = dynamodbattribute.UnmarshalMap(result.Item, item)
+	if err != nil {
+		return nil, err
+	}
+
+	return item, nil
 }
 
 func (s *DynamoStore) updateTTL() error {

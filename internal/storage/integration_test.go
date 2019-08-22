@@ -104,14 +104,14 @@ func TestDynamoStore(t *testing.T) {
 	err = store.CreateMutex(rqx, name, "a test mutex")
 	require.NoError(err)
 
-	m, err := store.GetMutex(true, name)
+	m, err := store.GetMutex(name, true)
 	require.NoError(err)
 	require.False(m.Locked)
 
 	err = store.LockMutex(rqx, name, "first attempt")
 	require.NoError(err)
 
-	m, err = store.GetMutex(true, name)
+	m, err = store.GetMutex(name, true)
 	require.NoError(err)
 	require.True(m.Locked)
 	require.Equal(user.SlackID, m.LockedBy)
@@ -122,7 +122,7 @@ func TestDynamoStore(t *testing.T) {
 	err = store.UnlockMutex(rqx, name)
 	require.NoError(err)
 
-	m, err = store.GetMutex(true, name)
+	m, err = store.GetMutex(name, true)
 	require.NoError(err)
 	require.False(m.Locked)
 	require.Empty(m.LockedBy)
