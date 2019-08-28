@@ -1,12 +1,15 @@
-.PHONY:  default  refresh  test  test-coverage  test-docker  test-release
+.PHONY:  default  diag  refresh  run  test  test-coverage  test-docker  test-release
 
 default: test
+
+diag:
+	(cd scripts/seqdiag ; go run main.go ../../docs/*.seq)
 
 refresh:
 	cookiecutter gh:sjansen/cookiecutter-golang --output-dir .. --config-file .cookiecutter.yaml --no-input --overwrite-if-exists
 	git checkout go.mod go.sum
 
-start:
+run:
 	docker-compose \
 		-f docker-compose.yml \
 		-f docker-compose.override.yml \
