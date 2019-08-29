@@ -1,0 +1,54 @@
+participant Requester (icon="human"): Browser\n/ Slack
+participant API
+participant Authn
+participant AuthnStore (icon="cylinder")
+participant Domain
+participant Authorizer
+participant Repository
+participant Database (icon="cylinder")
+participant Client
+participant ThirdParty: Third Party
+
+// note over Authn,AuthnStore:     Authentication
+// note over Repository,Database:  Data Stores
+
+Requester->API:         Request
+note over API:          abort if invalid
+API->Authn:             authenticate
+
+alt: [request signed]
+    Authn->AuthnStore:      read
+    Authn->Authn:           verify signature
+elsealt: [session cookie provided]
+    Authn->AuthnStore:      read
+    Authn->Authn:           verify session
+end
+
+note over Authn:        abort if not authorized
+API->Domain:            command / query 
+
+Domain->Authorizer:     authorize
+Authorizer->Repository: read
+Repository->Database:   read
+note over Domain:       abort if not authorized
+Domain->Domain:         plan strategy
+
+
+par: [collect data]
+    Domain->Repository:     read
+    Repository->Database:   read
+    Domain->Client:         query
+    Client->ThirdParty:     query
+end
+
+Domain->Domain:         process request
+
+par: [publish updates]
+    Domain->Client:         command
+    Client->ThirdParty:     command
+    Domain->Repository:     write
+    Repository->Database:  write
+end
+
+Domain->API:            result
+API->Requester:         Response
