@@ -6,6 +6,7 @@ import (
 	"github.com/sjansen/stopgap/internal/rqx"
 )
 
+// MutexRepoFake should only be used in tests.
 type MutexRepoFake struct {
 	Retries int
 	Mutexes map[string]string

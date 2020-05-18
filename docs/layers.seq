@@ -6,7 +6,7 @@ participant Domain
 participant Authorizer
 participant Repository
 participant Database (icon="cylinder")
-participant Client
+participant Adapter
 participant ThirdParty: Third Party
 
 // note over Authn,AuthnStore:     Authentication
@@ -37,15 +37,15 @@ Domain->Domain:         plan strategy
 par: [collect data]
     Domain->Repository:     read
     Repository->Database:   read
-    Domain->Client:         query
-    Client->ThirdParty:     query
+    Domain->Adapter:        query
+    Adapter->ThirdParty:    query
 end
 
 Domain->Domain:         process request
 
 par: [publish updates]
-    Domain->Client:         command
-    Client->ThirdParty:     command
+    Domain->Adapter:        command
+    Adapter->ThirdParty:    command
     Domain->Repository:     write
     Repository->Database:  write
 end

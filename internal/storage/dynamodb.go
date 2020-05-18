@@ -15,16 +15,23 @@ import (
 	"github.com/sjansen/stopgap/internal/rqx"
 )
 
+// DefaultTableName is used when a more specific name isn't provided.
 const DefaultTableName = "stopgap"
 
+// ErrDeleteInProgress is returned when table creation fails because
+// a table with the same name was recently deleted.
 var ErrDeleteInProgress = errors.New("table deletion in progress")
+
+// ErrCreateTimedOut is returned when table creation takes too long.
 var ErrCreateTimedOut = errors.New("timed out waiting for table creation")
 
+// DynamoStore stores mutex data in DynamoDB.
 type DynamoStore struct {
 	svc   *dynamodb.DynamoDB
 	table *string
 }
 
+// Mutex can be used to coordinate access to shared resources.
 type Mutex struct {
 	Version     int64
 	Description string
