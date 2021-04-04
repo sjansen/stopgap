@@ -1,15 +1,16 @@
 package storage
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/base64"
 	"strconv"
 	"time"
 
-	"github.com/aws/aws-sdk-go/aws"
-	"github.com/aws/aws-sdk-go/aws/awserr"
-	"github.com/aws/aws-sdk-go/service/dynamodb"
-	"github.com/aws/aws-sdk-go/service/dynamodb/dynamodbattribute"
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/feature/dynamodb/attributevalue"
+	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
+	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 	"github.com/pkg/errors"
 
 	"github.com/sjansen/stopgap/internal/rqx"
@@ -27,7 +28,7 @@ var ErrCreateTimedOut = errors.New("timed out waiting for table creation")
 
 // DynamoStore stores mutex data in DynamoDB.
 type DynamoStore struct {
-	svc   *dynamodb.DynamoDB
+	svc   *dynamodb.Client
 	table *string
 }
 
@@ -41,13 +42,13 @@ type Mutex struct {
 }
 
 // New creates a DynamoStore instance using default values.
-func New(svc *dynamodb.DynamoDB) *DynamoStore {
+func New(svc *dynamodb.Client) *DynamoStore {
 	return NewWithTableName(svc, DefaultTableName)
 }
 
 // NewWithTableName create a DynamoStore instance, overriding the default
 // table name.
-func NewWithTableName(svc *dynamodb.DynamoDB, table string) *DynamoStore {
+func NewWithTableName(svc *dynamodb.Client, table string) *DynamoStore {
 	return &DynamoStore{
 		svc:   svc,
 		table: aws.String(table),
@@ -63,18 +64,21 @@ func (s *DynamoStore) CreateMutex(rqx *rqx.RequestContext, name, description str
 	id := mutexEntityID(name)
 
 	t := &writeTransaction{}
-	err := t.addPut(&dynamodb.Put{
-		TableName: s.table,
-		Item: map[string]*dynamodb.AttributeValue{
-			"entity":      {S: aws.String(id)},
-			"revision":    {N: aws.String("0")},
-			"entity_type": {S: aws.String("mutex")},
-			"version":     {N: aws.String("1")},
-			"description": {S: aws.String(description)},
-			"summary": {M: map[string]*dynamodb.AttributeValue{
-				"locked": {BOOL: aws.Bool(false)},
-			}},
+	err := t.addPut(&types.Put{
+		Item: map[string]types.AttributeValue{
+			"entity":      &types.AttributeValueMemberS{Value: id},
+			"revision":    &types.AttributeValueMemberN{Value: "0"},
+			"entity_type": &types.AttributeValueMemberS{Value: "mutex"},
+			"version":     &types.AttributeValueMemberN{Value: "1"},
+			"description": &types.AttributeValueMemberS{Value: description},
+			"summary": &types.AttributeValueMemberM{
+				Value: map[string]types.AttributeValue{
+					"locked": &types.AttributeValueMemberBOOL{Value: false},
+				},
+			},
 		},
+		TableName:           s.table,
+		ConditionExpression: aws.String("attribute_not_exists(entity)"),
 	}).addEvent(rqx, s.table, id, 1,
 		"mutex-created",
 		map[string]string{
@@ -115,11 +119,11 @@ func (s *DynamoStore) LockMutex(rqx *rqx.RequestContext, name, message string) e
 
 	t := &writeTransaction{}
 	version := item.Version + 1
-	err = t.addUpdate(&dynamodb.Update{
+	err = t.addUpdate(&types.Update{
 		TableName: s.table,
-		Key: map[string]*dynamodb.AttributeValue{
-			"entity":   {S: aws.String(id)},
-			"revision": {N: aws.String("0")},
+		Key: map[string]types.AttributeValue{
+			"entity":   &types.AttributeValueMemberS{Value: id},
+			"revision": &types.AttributeValueMemberN{Value: "0"},
 		},
 		ConditionExpression: aws.String(
 			"summary.locked <> :locked",
@@ -130,13 +134,13 @@ func (s *DynamoStore) LockMutex(rqx *rqx.RequestContext, name, message string) e
 			    summary.message = :message,
 			    version = :version
 		`),
-		ExpressionAttributeValues: map[string]*dynamodb.AttributeValue{
-			":locked":    {BOOL: aws.Bool(true)},
-			":locked_by": {S: aws.String(rqx.EUser.SlackID)},
-			":message":   {S: aws.String(message)},
-			":version": {N: aws.String(
-				strconv.FormatInt(version, 10),
-			)},
+		ExpressionAttributeValues: map[string]types.AttributeValue{
+			":locked":    &types.AttributeValueMemberBOOL{Value: true},
+			":locked_by": &types.AttributeValueMemberS{Value: rqx.EUser.SlackID},
+			":message":   &types.AttributeValueMemberS{Value: message},
+			":version": &types.AttributeValueMemberN{
+				Value: strconv.FormatInt(version, 10),
+			},
 		},
 	}).addEvent(rqx, s.table, id, version,
 		"mutex-locked",
@@ -161,11 +165,11 @@ func (s *DynamoStore) UnlockMutex(rqx *rqx.RequestContext, name string) error {
 
 	t := &writeTransaction{}
 	version := item.Version + 1
-	err = t.addUpdate(&dynamodb.Update{
+	err = t.addUpdate(&types.Update{
 		TableName: s.table,
-		Key: map[string]*dynamodb.AttributeValue{
-			"entity":   {S: aws.String(id)},
-			"revision": {N: aws.String("0")},
+		Key: map[string]types.AttributeValue{
+			"entity":   &types.AttributeValueMemberS{Value: id},
+			"revision": &types.AttributeValueMemberN{Value: "0"},
 		},
 		ConditionExpression: aws.String(
 			"summary.locked <> :locked",
@@ -176,11 +180,11 @@ func (s *DynamoStore) UnlockMutex(rqx *rqx.RequestContext, name string) error {
 			REMOVE summary.locked_by,
 			       summary.message
 		`),
-		ExpressionAttributeValues: map[string]*dynamodb.AttributeValue{
-			":locked": {BOOL: aws.Bool(false)},
-			":version": {N: aws.String(
-				strconv.FormatInt(version, 10),
-			)},
+		ExpressionAttributeValues: map[string]types.AttributeValue{
+			":locked": &types.AttributeValueMemberBOOL{Value: false},
+			":version": &types.AttributeValueMemberN{
+				Value: strconv.FormatInt(version, 10),
+			},
 		},
 	}).addEvent(rqx, s.table, id, version,
 		"mutex-unlocked",
@@ -215,63 +219,67 @@ func (s *DynamoStore) checkForTable() (bool, error) {
 	describeTable := &dynamodb.DescribeTableInput{
 		TableName: s.table,
 	}
-	result, err := s.svc.DescribeTable(describeTable)
+	// TODO: thread ctx
+	result, err := s.svc.DescribeTable(context.TODO(), describeTable)
 	if err != nil {
-		if aerr, ok := err.(awserr.Error); ok {
-			if aerr.Code() == dynamodb.ErrCodeResourceNotFoundException {
-				return false, nil
-			}
+		var notFoundErr *types.ResourceNotFoundException
+		if errors.As(err, &notFoundErr) {
+			return false, nil
 		}
 		return false, err
 	}
-	switch status := aws.StringValue(result.Table.TableStatus); status {
-	case "CREATING":
+	switch result.Table.TableStatus {
+	case types.TableStatusCreating:
 		return true, s.waitForTable()
-	case "DELETING":
+	case types.TableStatusDeleting:
 		return false, ErrDeleteInProgress
-	case "ACTIVE", "UPDATING":
+	case types.TableStatusActive, types.TableStatusUpdating:
 		return true, nil
 	default:
-		return false, errors.New("unrecognized table status: " + status)
+		return false, errors.New(
+			"unrecognized table status: " + string(result.Table.TableStatus),
+		)
 	}
 }
 
 func (s *DynamoStore) createTable() error {
 	createTable := &dynamodb.CreateTableInput{
-		BillingMode: aws.String("PAY_PER_REQUEST"),
+		BillingMode: types.BillingModePayPerRequest,
 		TableName:   s.table,
-		KeySchema: []*dynamodb.KeySchemaElement{
+		KeySchema: []types.KeySchemaElement{
 			{
 				AttributeName: aws.String("entity"),
-				KeyType:       aws.String("HASH"),
+				KeyType:       types.KeyTypeHash,
 			},
 			{
 				AttributeName: aws.String("revision"),
-				KeyType:       aws.String("RANGE"),
+				KeyType:       types.KeyTypeRange,
 			},
 		},
-		AttributeDefinitions: []*dynamodb.AttributeDefinition{
+		AttributeDefinitions: []types.AttributeDefinition{
 			{
 				AttributeName: aws.String("entity"),
-				AttributeType: aws.String("S"),
+				AttributeType: types.ScalarAttributeTypeS,
 			},
 			{
 				AttributeName: aws.String("revision"),
-				AttributeType: aws.String("N"),
+				AttributeType: types.ScalarAttributeTypeN,
 			},
 		},
 	}
-	_, err := s.svc.CreateTable(createTable)
+	// TODO: thread ctx
+	_, err := s.svc.CreateTable(context.TODO(), createTable)
 	return err
 }
 
 func (s *DynamoStore) getMutex(id, projection string, consistent bool) (*mutex, error) {
-	result, err := s.svc.GetItem(&dynamodb.GetItemInput{
+	// TODO: thread ctx
+	result, err := s.svc.GetItem(context.TODO(), &dynamodb.GetItemInput{
 		ConsistentRead: aws.Bool(consistent),
 		TableName:      s.table,
-		Key: map[string]*dynamodb.AttributeValue{
-			"entity":   {S: aws.String(id)},
-			"revision": {N: aws.String("0")},
+		Key: map[string]types.AttributeValue{
+			"entity":   &types.AttributeValueMemberS{Value: id},
+			"revision": &types.AttributeValueMemberN{Value: "0"},
 		},
 		ProjectionExpression: aws.String(projection),
 	})
@@ -280,7 +288,7 @@ func (s *DynamoStore) getMutex(id, projection string, consistent bool) (*mutex, 
 	}
 
 	item := &mutex{}
-	err = dynamodbattribute.UnmarshalMap(result.Item, item)
+	err = attributevalue.UnmarshalMap(result.Item, item)
 	if err != nil {
 		return nil, err
 	}
@@ -291,12 +299,13 @@ func (s *DynamoStore) getMutex(id, projection string, consistent bool) (*mutex, 
 func (s *DynamoStore) updateTTL() error {
 	updateTTL := &dynamodb.UpdateTimeToLiveInput{
 		TableName: s.table,
-		TimeToLiveSpecification: &dynamodb.TimeToLiveSpecification{
+		TimeToLiveSpecification: &types.TimeToLiveSpecification{
 			AttributeName: aws.String("ttl"),
 			Enabled:       aws.Bool(true),
 		},
 	}
-	_, err := s.svc.UpdateTimeToLive(updateTTL)
+	// TODO: thread ctx
+	_, err := s.svc.UpdateTimeToLive(context.TODO(), updateTTL)
 	return err
 }
 
@@ -306,22 +315,20 @@ func (s *DynamoStore) waitForTable() error {
 	}
 	for i := 0; i < 60; i++ {
 		time.Sleep(1 * time.Second)
-		result, err := s.svc.DescribeTable(describeTable)
+		// TODO: thread ctx
+		result, err := s.svc.DescribeTable(context.TODO(), describeTable)
 		if err != nil {
-			if aerr, ok := err.(awserr.Error); ok {
-				if aerr.Code() != dynamodb.ErrCodeResourceNotFoundException {
-					return err
-				}
-			} else {
+			var notFoundErr *types.ResourceNotFoundException
+			if !errors.As(err, &notFoundErr) {
 				return err
 			}
 		}
-		switch aws.StringValue(result.Table.TableStatus) {
-		case "CREATING":
+		switch result.Table.TableStatus {
+		case types.TableStatusCreating:
 			// continue loop
-		case "DELETING":
+		case types.TableStatusDeleting:
 			return ErrDeleteInProgress
-		case "ACTIVE", "UPDATING":
+		case types.TableStatusActive, types.TableStatusUpdating:
 			return nil
 		}
 	}
@@ -329,10 +336,10 @@ func (s *DynamoStore) waitForTable() error {
 }
 
 type writeTransaction struct {
-	ops []*dynamodb.TransactWriteItem
+	ops []types.TransactWriteItem
 }
 
-func (t *writeTransaction) add(op *dynamodb.TransactWriteItem) *writeTransaction {
+func (t *writeTransaction) add(op types.TransactWriteItem) *writeTransaction {
 	t.ops = append(t.ops, op)
 	return t
 }
@@ -346,7 +353,7 @@ func (t *writeTransaction) addEvent(
 	data map[string]string,
 ) error {
 	now := time.Now()
-	event, err := dynamodbattribute.MarshalMap(&event{
+	event, err := attributevalue.MarshalMap(&event{
 		base: base{
 			ID:       entity,
 			Revision: revision,
@@ -374,7 +381,7 @@ func (t *writeTransaction) addEvent(
 	if err != nil {
 		return err
 	}
-	t.addPut(&dynamodb.Put{
+	t.addPut(&types.Put{
 		TableName: table,
 		Item:      event,
 		ConditionExpression: aws.String(
@@ -384,26 +391,27 @@ func (t *writeTransaction) addEvent(
 	return nil
 }
 
-func (t *writeTransaction) addPut(op *dynamodb.Put) *writeTransaction {
-	return t.add(&dynamodb.TransactWriteItem{
+func (t *writeTransaction) addPut(op *types.Put) *writeTransaction {
+	return t.add(types.TransactWriteItem{
 		Put: op,
 	})
 }
 
-func (t *writeTransaction) addUpdate(op *dynamodb.Update) *writeTransaction {
-	return t.add(&dynamodb.TransactWriteItem{
+func (t *writeTransaction) addUpdate(op *types.Update) *writeTransaction {
+	return t.add(types.TransactWriteItem{
 		Update: op,
 	})
 }
 
-func (t *writeTransaction) exec(svc *dynamodb.DynamoDB) error {
+func (t *writeTransaction) exec(svc *dynamodb.Client) error {
 	token := make([]byte, 20)
 	if _, err := rand.Read(token); err != nil {
 		return errors.Wrap(err, "unable to generate request token")
 	}
 
 	// TODO: add retry logic
-	_, err := svc.TransactWriteItems(&dynamodb.TransactWriteItemsInput{
+	// TODO: thread ctx
+	_, err := svc.TransactWriteItems(context.TODO(), &dynamodb.TransactWriteItemsInput{
 		TransactItems:      t.ops,
 		ClientRequestToken: aws.String(base64.RawURLEncoding.EncodeToString(token)),
 	})
