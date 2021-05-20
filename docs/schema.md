@@ -4,10 +4,10 @@
 
 | Entity  | PK            | SK            |
 |---------|---------------|---------------|
-| Channel | CHAN#slack_id | CHAN#slack_id |
-| Mutex   | MUTEX#name    | MUTEX#name    |
-| Role    | USER#slack_id | USER#slack_id |
-| User    | ROLE#name     | ROLE#name     |
+| Channel | CHAN#slack_id |               |
+| Mutex   | MUTEX#name    |               |
+| Role    | ROLE#name     |               |
+| User    | USER#slack_id |               |
 
 ## Secondary Keys
 
