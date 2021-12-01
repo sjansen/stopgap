@@ -3,7 +3,7 @@ module github.com/sjansen/stopgap
 go 1.12
 
 require (
-	github.com/aws/aws-sdk-go-v2 v1.5.0
+	github.com/aws/aws-sdk-go-v2 v1.11.1
 	github.com/aws/aws-sdk-go-v2/credentials v1.2.0
 	github.com/aws/aws-sdk-go-v2/feature/dynamodb/attributevalue v1.1.0
 	github.com/aws/aws-sdk-go-v2/service/dynamodb v1.3.0
